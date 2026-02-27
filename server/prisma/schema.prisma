@@ -1,0 +1,116 @@
+// This is your Prisma schema file.
+// Learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────
+// User — the account owner
+// ─────────────────────────────────────────
+model User {
+  id              String       @id @default(uuid())
+  email           String       @unique
+  passwordHash    String
+  // PBKDF2-derived key verifier (never the key itself)
+  masterKeyHash   String?
+  mfaEnabled      Boolean      @default(false)
+  mfaSecret       String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  vaults          Vault[]
+  auditLogs       AuditLog[]
+
+  @@map("users")
+}
+
+// ─────────────────────────────────────────
+// Vault — named container for secrets
+// ─────────────────────────────────────────
+model Vault {
+  id          String       @id @default(uuid())
+  userId      String
+  name        String
+  description String?
+  icon        String?      @default("lock")
+  color       String?      @default("#6366f1")
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  credentials Credential[]
+  documents   Document[]
+
+  @@map("vaults")
+}
+
+// ─────────────────────────────────────────
+// Credential — encrypted username/password
+// ─────────────────────────────────────────
+model Credential {
+  id                  String   @id @default(uuid())
+  vaultId             String
+  label               String
+  url                 String?
+  // All sensitive fields encrypted client-side (AES-256-GCM)
+  encryptedUsername   String
+  encryptedPassword   String
+  encryptedNotes      String?
+  // Initialisation vector used for this credential
+  iv                  String
+  // Auth tag for GCM integrity verification
+  authTag             String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  vault               Vault    @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+
+  @@map("credentials")
+}
+
+// ─────────────────────────────────────────
+// Document — encrypted file reference
+// ─────────────────────────────────────────
+model Document {
+  id              String   @id @default(uuid())
+  vaultId         String
+  // Original filename (not encrypted — used for display)
+  fileName        String
+  // Encrypted file content stored on disk; path to the file
+  storagePath     String
+  mimeType        String
+  sizeBytes       Int
+  // IV + authTag for the file content encryption
+  iv              String
+  authTag         String
+  createdAt       DateTime @default(now())
+
+  vault           Vault    @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+
+  @@map("documents")
+}
+
+// ─────────────────────────────────────────
+// AuditLog — immutable access history
+// ─────────────────────────────────────────
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String
+  action      String   // e.g. "CREDENTIAL_READ", "DOCUMENT_UPLOAD"
+  resource    String   // e.g. "credential:uuid"
+  ipAddress   String?
+  userAgent   String?
+  metadata    Json?
+  timestamp   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, timestamp])
+  @@map("audit_logs")
+}
